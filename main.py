@@ -1,9 +1,8 @@
-
+import os
 import discord
 from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
-import os
 
 # ======================
 # LOAD ENV
@@ -15,21 +14,18 @@ TOKEN = os.getenv("TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID"))
 MUSIC_FILE = os.getenv("MUSIC_FILE", "music.mp3")
 
-music_started = False
-
 # ======================
 # BOT
 # ======================
 
 intents = discord.Intents.default()
-intents.voice_states = True
 intents.guilds = True
+intents.voice_states = True
 
 bot = commands.Bot(
     command_prefix="!",
     intents=intents
 )
-
 
 # ======================
 # OWNER CHECK
@@ -38,14 +34,11 @@ bot = commands.Bot(
 def is_owner(user_id):
     return user_id == OWNER_ID
 
-
 # ======================
 # MUSIC
 # ======================
 
-def play_music(vc):
-
-    global music_started
+def play_music(vc: discord.VoiceClient):
 
     try:
 
@@ -55,29 +48,28 @@ def play_music(vc):
         if vc.is_playing():
             return
 
-        if music_started:
+        if not os.path.exists(MUSIC_FILE):
+            print(f"❌ Music file not found: {MUSIC_FILE}")
             return
 
         source = discord.FFmpegPCMAudio(
             source=MUSIC_FILE,
             executable="ffmpeg",
-            options="-stream_loop -1"
+            before_options="-stream_loop -1"
         )
 
         vc.play(
             source,
-            after=lambda e:
-            print("Audio ended:", e)
+            after=lambda e: print(
+                f"Audio Player Error: {e}"
+            ) if e else None
         )
 
-        music_started = True
-
-        print("Music started")
+        print(f"🎵 Playing {MUSIC_FILE}")
 
     except Exception as e:
 
-        print("Music error:", e)
-
+        print("Music Error:", e)
 
 # ======================
 # READY
@@ -86,30 +78,30 @@ def play_music(vc):
 @bot.event
 async def on_ready():
 
-    await bot.tree.sync()
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} commands")
+    except Exception as e:
+        print(e)
 
     print(f"Logged in as {bot.user}")
-
+    print(f"Music file exists: {os.path.exists(MUSIC_FILE)}")
 
 # ======================
-# JOIN
+# JOIN COMMAND
 # ======================
 
 @bot.tree.command(
     name="join",
-    description="Join voice channel"
+    description="Join your voice channel"
 )
-async def join(
-    interaction: discord.Interaction
-):
+async def join(interaction: discord.Interaction):
 
     await interaction.response.defer()
 
     try:
 
-        if not is_owner(
-            interaction.user.id
-        ):
+        if not is_owner(interaction.user.id):
 
             await interaction.followup.send(
                 "❌ Owner only."
@@ -119,30 +111,26 @@ async def join(
         if not interaction.user.voice:
 
             await interaction.followup.send(
-                "❌ Join a VC first."
+                "❌ Join a voice channel first."
             )
             return
 
-        channel = (
-            interaction.user.voice.channel
-        )
+        channel = interaction.user.voice.channel
 
-        vc = (
-            interaction.guild.voice_client
-        )
+        vc = interaction.guild.voice_client
 
         if vc:
 
-            await vc.move_to(
-                channel
-            )
+            await vc.move_to(channel)
 
         else:
 
-            await channel.connect()
+            vc = await channel.connect()
+
+        play_music(vc)
 
         await interaction.followup.send(
-            f"✅ Joined {channel.name}"
+            f"✅ Joined **{channel.name}** and started music."
         )
 
     except Exception as e:
@@ -153,37 +141,28 @@ async def join(
             f"❌ {e}"
         )
 
-
 # ======================
-# LEAVE
+# LEAVE COMMAND
 # ======================
 
 @bot.tree.command(
     name="leave",
-    description="Leave VC"
+    description="Leave voice channel"
 )
-async def leave(
-    interaction: discord.Interaction
-):
-
-    global music_started
+async def leave(interaction: discord.Interaction):
 
     await interaction.response.defer()
 
     try:
 
-        if not is_owner(
-            interaction.user.id
-        ):
+        if not is_owner(interaction.user.id):
 
             await interaction.followup.send(
                 "❌ Owner only."
             )
             return
 
-        vc = (
-            interaction.guild.voice_client
-        )
+        vc = interaction.guild.voice_client
 
         if not vc:
 
@@ -192,17 +171,13 @@ async def leave(
             )
             return
 
-        music_started = False
-
         if vc.is_playing():
             vc.stop()
 
-        await vc.disconnect(
-            force=True
-        )
+        await vc.disconnect(force=True)
 
         await interaction.followup.send(
-            "✅ Left voice channel"
+            "✅ Disconnected."
         )
 
     except Exception as e:
@@ -210,59 +185,38 @@ async def leave(
         print(e)
 
         await interaction.followup.send(
-            "❌ Failed."
+            "❌ Failed to disconnect."
         )
 
-
 # ======================
-# AUTO MUSIC
+# AUTO PLAY WHEN USER JOINS VC
 # ======================
 
 @bot.event
-async def on_voice_state_update(
-    member,
-    before,
-    after
-):
+async def on_voice_state_update(member, before, after):
 
     if member.bot:
         return
 
-    vc = (
-        member.guild.voice_client
-    )
+    vc = member.guild.voice_client
 
     if not vc:
         return
 
-    if (
-        after.channel
-        and
-        vc.channel
-        and
-        after.channel.id
-        ==
-        vc.channel.id
-    ):
+    if not vc.channel:
+        return
 
-        humans = [
+    humans = [
+        m for m in vc.channel.members
+        if not m.bot
+    ]
 
-            m
+    if len(humans) > 0 and not vc.is_playing():
 
-            for m
-
-            in vc.channel.members
-
-            if not m.bot
-        ]
-
-        if len(humans) > 0:
-
-            play_music(vc)
-
+        play_music(vc)
 
 # ======================
-# START
+# RUN BOT
 # ======================
 
 bot.run(TOKEN)
