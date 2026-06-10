@@ -1,5 +1,6 @@
 import os
 import shutil
+import asyncio
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -196,24 +197,38 @@ async def leave(interaction: discord.Interaction):
 @bot.event
 async def on_voice_state_update(member, before, after):
 
+    # Ignore bots
     if member.bot:
         return
 
     vc = member.guild.voice_client
 
+    # Bot not connected
     if vc is None:
         return
 
-    if vc.channel is None:
-        return
-
-    # User joined bot VC
+    # User joined bot's voice channel
     if (
         before.channel != vc.channel
         and after.channel == vc.channel
     ):
 
-        print(f"{member} joined {vc.channel.name}")
+        print(
+            f"{member} joined {vc.channel.name}. "
+            f"Restarting music in 1.5 seconds..."
+        )
+
+        # Wait 1.5 seconds
+        await asyncio.sleep(1.5)
+
+        # Verify bot still connected
+        vc = member.guild.voice_client
+
+        if vc is None:
+            return
+
+        if vc.channel is None:
+            return
 
         if vc.is_playing():
             vc.stop()
