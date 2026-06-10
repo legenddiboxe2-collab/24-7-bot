@@ -1,3 +1,4 @@
+```python
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -13,6 +14,8 @@ load_dotenv()
 TOKEN = os.getenv("TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID"))
 MUSIC_FILE = os.getenv("MUSIC_FILE", "music.mp3")
+
+music_started = False
 
 # ======================
 # BOT
@@ -42,18 +45,38 @@ def is_owner(user_id):
 
 def play_music(vc):
 
-    if not vc:
-        return
+    global music_started
 
-    if vc.is_playing():
-        return
+    try:
 
-    source = discord.FFmpegPCMAudio(
-        MUSIC_FILE,
-        options="-stream_loop -1"
-    )
+        if not vc:
+            return
 
-    vc.play(source)
+        if vc.is_playing():
+            return
+
+        if music_started:
+            return
+
+        source = discord.FFmpegPCMAudio(
+            source=MUSIC_FILE,
+            executable="ffmpeg",
+            options="-stream_loop -1"
+        )
+
+        vc.play(
+            source,
+            after=lambda e:
+            print("Audio ended:", e)
+        )
+
+        music_started = True
+
+        print("Music started")
+
+    except Exception as e:
+
+        print("Music error:", e)
 
 
 # ======================
@@ -69,44 +92,44 @@ async def on_ready():
 
 
 # ======================
-# /JOIN
+# JOIN
 # ======================
 
 @bot.tree.command(
     name="join",
-    description="Join configured voice channel"
+    description="Join voice channel"
 )
 async def join(
     interaction: discord.Interaction
 ):
 
-    if not is_owner(
-        interaction.user.id
-    ):
-
-        await interaction.response.send_message(
-            "❌ Owner only.",
-            ephemeral=True
-        )
-        return
-
-    if not interaction.user.voice:
-
-        await interaction.response.send_message(
-            "❌ Join a VC first.",
-            ephemeral=True
-        )
-        return
-
-    channel = (
-        interaction.user.voice.channel
-    )
-
-    vc = (
-        interaction.guild.voice_client
-    )
+    await interaction.response.defer()
 
     try:
+
+        if not is_owner(
+            interaction.user.id
+        ):
+
+            await interaction.followup.send(
+                "❌ Owner only."
+            )
+            return
+
+        if not interaction.user.voice:
+
+            await interaction.followup.send(
+                "❌ Join a VC first."
+            )
+            return
+
+        channel = (
+            interaction.user.voice.channel
+        )
+
+        vc = (
+            interaction.guild.voice_client
+        )
 
         if vc:
 
@@ -116,65 +139,83 @@ async def join(
 
         else:
 
-            vc = await channel.connect()
+            await channel.connect()
 
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"✅ Joined {channel.name}"
         )
 
     except Exception as e:
 
-        await interaction.response.send_message(
-            str(e),
-            ephemeral=True
+        print(e)
+
+        await interaction.followup.send(
+            f"❌ {e}"
         )
 
 
 # ======================
-# /LEAVE
+# LEAVE
 # ======================
 
 @bot.tree.command(
     name="leave",
-    description="Disconnect bot"
+    description="Leave VC"
 )
 async def leave(
     interaction: discord.Interaction
 ):
 
-    if not is_owner(
-        interaction.user.id
-    ):
+    global music_started
 
-        await interaction.response.send_message(
-            "❌ Owner only.",
-            ephemeral=True
+    await interaction.response.defer()
+
+    try:
+
+        if not is_owner(
+            interaction.user.id
+        ):
+
+            await interaction.followup.send(
+                "❌ Owner only."
+            )
+            return
+
+        vc = (
+            interaction.guild.voice_client
         )
-        return
 
-    vc = (
-        interaction.guild.voice_client
-    )
+        if not vc:
 
-    if not vc:
+            await interaction.followup.send(
+                "❌ Not connected."
+            )
+            return
 
-        await interaction.response.send_message(
-            "❌ Not connected.",
-            ephemeral=True
+        music_started = False
+
+        if vc.is_playing():
+            vc.stop()
+
+        await vc.disconnect(
+            force=True
         )
-        return
 
-    vc.stop()
+        await interaction.followup.send(
+            "✅ Left voice channel"
+        )
 
-    await vc.disconnect()
+    except Exception as e:
 
-    await interaction.response.send_message(
-        "✅ Left voice channel"
-    )
+        print(e)
+
+        await interaction.followup.send(
+            "❌ Failed."
+        )
 
 
 # ======================
-# AUTO PLAY
+# AUTO MUSIC
 # ======================
 
 @bot.event
@@ -187,7 +228,9 @@ async def on_voice_state_update(
     if member.bot:
         return
 
-    vc = member.guild.voice_client
+    vc = (
+        member.guild.voice_client
+    )
 
     if not vc:
         return
@@ -195,19 +238,25 @@ async def on_voice_state_update(
     if (
         after.channel
         and
+        vc.channel
+        and
         after.channel.id
         ==
         vc.channel.id
     ):
 
         humans = [
+
             m
+
             for m
+
             in vc.channel.members
+
             if not m.bot
         ]
 
-        if humans:
+        if len(humans) > 0:
 
             play_music(vc)
 
@@ -217,3 +266,4 @@ async def on_voice_state_update(
 # ======================
 
 bot.run(TOKEN)
+```
