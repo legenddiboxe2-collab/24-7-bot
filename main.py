@@ -41,7 +41,7 @@ def is_owner(user_id):
 def play_music(vc: discord.VoiceClient):
     try:
 
-        if not vc:
+        if vc is None:
             return
 
         if vc.is_playing():
@@ -56,8 +56,6 @@ def play_music(vc: discord.VoiceClient):
         if ffmpeg_path is None:
             print("❌ FFmpeg not found on system.")
             return
-
-        print(f"✅ FFmpeg found: {ffmpeg_path}")
 
         source = discord.FFmpegPCMAudio(
             source=MUSIC_FILE,
@@ -88,11 +86,11 @@ async def on_ready():
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} commands")
     except Exception as e:
-        print(e)
+        print("Command sync error:", e)
 
     print(f"Logged in as {bot.user}")
     print(f"Music file exists: {os.path.exists(MUSIC_FILE)}")
-    print(f"FFmpeg: {shutil.which('ffmpeg')}")
+    print(f"FFmpeg path: {shutil.which('ffmpeg')}")
 
 # ======================
 # JOIN
@@ -114,9 +112,9 @@ async def join(interaction: discord.Interaction):
             )
             return
 
-        if not interaction.user.voice:
+        if interaction.user.voice is None:
             await interaction.followup.send(
-                "❌ Join a VC first."
+                "❌ Join a voice channel first."
             )
             return
 
@@ -125,8 +123,12 @@ async def join(interaction: discord.Interaction):
         vc = interaction.guild.voice_client
 
         if vc:
-            await vc.move_to(channel)
+
+            if vc.channel != channel:
+                await vc.move_to(channel)
+
         else:
+
             vc = await channel.connect()
 
         play_music(vc)
@@ -137,7 +139,7 @@ async def join(interaction: discord.Interaction):
 
     except Exception as e:
 
-        print(e)
+        print("Join Error:", e)
 
         await interaction.followup.send(
             f"❌ {e}"
@@ -165,7 +167,7 @@ async def leave(interaction: discord.Interaction):
 
         vc = interaction.guild.voice_client
 
-        if not vc:
+        if vc is None:
             await interaction.followup.send(
                 "❌ Not connected."
             )
@@ -182,14 +184,14 @@ async def leave(interaction: discord.Interaction):
 
     except Exception as e:
 
-        print(e)
+        print("Leave Error:", e)
 
         await interaction.followup.send(
-            "❌ Failed."
+            f"❌ {e}"
         )
 
 # ======================
-# AUTO PLAY
+# AUTO PLAY WHEN USER JOINS BOT VC
 # ======================
 
 @bot.event
@@ -200,19 +202,22 @@ async def on_voice_state_update(member, before, after):
 
     vc = member.guild.voice_client
 
-    if not vc:
+    if vc is None:
         return
 
-    if not vc.channel:
+    if vc.channel is None:
         return
 
-    humans = [
-        m for m in vc.channel.members
-        if not m.bot
-    ]
+    # Only trigger when a user joins the bot's VC
+    if (
+        before.channel != vc.channel
+        and after.channel == vc.channel
+    ):
 
-    if humans and not vc.is_playing():
-        play_music(vc)
+        print(f"{member} joined {vc.channel.name}")
+
+        if not vc.is_playing():
+            play_music(vc)
 
 # ======================
 # RUN
