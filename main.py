@@ -266,4 +266,3 @@ async def on_voice_state_update(
 # ======================
 
 bot.run(TOKEN)
-```
