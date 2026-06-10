@@ -218,8 +218,8 @@ async def on_voice_state_update(member, before, after):
             f"Restarting music in 1.5 seconds..."
         )
 
-        # Wait 2.0 seconds
-        await asyncio.sleep(2.0)
+        # Wait 3.0 seconds
+        await asyncio.sleep(3.0)
 
         # Verify bot still connected
         vc = member.guild.voice_client
