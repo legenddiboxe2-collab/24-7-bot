@@ -44,9 +44,6 @@ def play_music(vc: discord.VoiceClient):
         if vc is None:
             return
 
-        if vc.is_playing():
-            return
-
         if not os.path.isfile(MUSIC_FILE):
             print(f"❌ Music file not found: {MUSIC_FILE}")
             return
@@ -54,13 +51,12 @@ def play_music(vc: discord.VoiceClient):
         ffmpeg_path = shutil.which("ffmpeg")
 
         if ffmpeg_path is None:
-            print("❌ FFmpeg not found on system.")
+            print("❌ FFmpeg not found.")
             return
 
         source = discord.FFmpegPCMAudio(
             source=MUSIC_FILE,
-            executable=ffmpeg_path,
-            before_options="-stream_loop -1"
+            executable=ffmpeg_path
         )
 
         vc.play(
@@ -86,19 +82,19 @@ async def on_ready():
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} commands")
     except Exception as e:
-        print("Command sync error:", e)
+        print("Sync Error:", e)
 
     print(f"Logged in as {bot.user}")
     print(f"Music file exists: {os.path.exists(MUSIC_FILE)}")
-    print(f"FFmpeg path: {shutil.which('ffmpeg')}")
+    print(f"FFmpeg: {shutil.which('ffmpeg')}")
 
 # ======================
-# JOIN
+# JOIN COMMAND
 # ======================
 
 @bot.tree.command(
     name="join",
-    description="Join VC and play music"
+    description="Join VC and start music"
 )
 async def join(interaction: discord.Interaction):
 
@@ -112,9 +108,9 @@ async def join(interaction: discord.Interaction):
             )
             return
 
-        if interaction.user.voice is None:
+        if not interaction.user.voice:
             await interaction.followup.send(
-                "❌ Join a voice channel first."
+                "❌ Join a VC first."
             )
             return
 
@@ -131,6 +127,9 @@ async def join(interaction: discord.Interaction):
 
             vc = await channel.connect()
 
+        if vc.is_playing():
+            vc.stop()
+
         play_music(vc)
 
         await interaction.followup.send(
@@ -146,7 +145,7 @@ async def join(interaction: discord.Interaction):
         )
 
 # ======================
-# LEAVE
+# LEAVE COMMAND
 # ======================
 
 @bot.tree.command(
@@ -191,7 +190,7 @@ async def leave(interaction: discord.Interaction):
         )
 
 # ======================
-# AUTO PLAY WHEN USER JOINS BOT VC
+# RESTART MUSIC WHEN USER JOINS BOT VC
 # ======================
 
 @bot.event
@@ -208,7 +207,7 @@ async def on_voice_state_update(member, before, after):
     if vc.channel is None:
         return
 
-    # Only trigger when a user joins the bot's VC
+    # User joined bot VC
     if (
         before.channel != vc.channel
         and after.channel == vc.channel
@@ -216,8 +215,10 @@ async def on_voice_state_update(member, before, after):
 
         print(f"{member} joined {vc.channel.name}")
 
-        if not vc.is_playing():
-            play_music(vc)
+        if vc.is_playing():
+            vc.stop()
+
+        play_music(vc)
 
 # ======================
 # RUN
