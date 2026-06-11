@@ -29,6 +29,13 @@ bot = commands.Bot(
 )
 
 # ======================
+# GLOBALS
+# ======================
+
+restart_tasks = {}
+music_lock = asyncio.Lock()
+
+# ======================
 # OWNER CHECK
 # ======================
 
@@ -36,41 +43,51 @@ def is_owner(user_id):
     return user_id == OWNER_ID
 
 # ======================
-# MUSIC
+# PLAY MUSIC
 # ======================
 
-def play_music(vc: discord.VoiceClient):
-    try:
+async def restart_music(vc: discord.VoiceClient):
 
-        if vc is None:
-            return
+    async with music_lock:
 
-        if not os.path.isfile(MUSIC_FILE):
-            print(f"❌ Music file not found: {MUSIC_FILE}")
-            return
+        try:
 
-        ffmpeg_path = shutil.which("ffmpeg")
+            if vc is None:
+                return
 
-        if ffmpeg_path is None:
-            print("❌ FFmpeg not found.")
-            return
+            if not vc.is_connected():
+                return
 
-        source = discord.FFmpegPCMAudio(
-            source=MUSIC_FILE,
-            executable=ffmpeg_path
-        )
+            if not os.path.isfile(MUSIC_FILE):
+                print(f"❌ Music file not found: {MUSIC_FILE}")
+                return
 
-        vc.play(
-            source,
-            after=lambda e: print(
-                f"Player Error: {e}"
-            ) if e else None
-        )
+            ffmpeg_path = shutil.which("ffmpeg")
 
-        print(f"🎵 Playing {MUSIC_FILE}")
+            if ffmpeg_path is None:
+                print("❌ FFmpeg not found.")
+                return
 
-    except Exception as e:
-        print("Music Error:", e)
+            if vc.is_playing():
+                vc.stop()
+                await asyncio.sleep(0.5)
+
+            source = discord.FFmpegPCMAudio(
+                source=MUSIC_FILE,
+                executable=ffmpeg_path
+            )
+
+            vc.play(
+                source,
+                after=lambda e: print(
+                    f"Player Error: {e}"
+                ) if e else None
+            )
+
+            print(f"🎵 Playing {MUSIC_FILE}")
+
+        except Exception as e:
+            print("Music Error:", e)
 
 # ======================
 # READY
@@ -81,7 +98,7 @@ async def on_ready():
 
     try:
         synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} commands")
+        print(f"✅ Synced {len(synced)} commands")
     except Exception as e:
         print("Sync Error:", e)
 
@@ -90,7 +107,7 @@ async def on_ready():
     print(f"FFmpeg: {shutil.which('ffmpeg')}")
 
 # ======================
-# JOIN COMMAND
+# JOIN
 # ======================
 
 @bot.tree.command(
@@ -126,12 +143,11 @@ async def join(interaction: discord.Interaction):
 
         else:
 
-            vc = await channel.connect()
+            vc = await channel.connect(
+                reconnect=True
+            )
 
-        if vc.is_playing():
-            vc.stop()
-
-        play_music(vc)
+        await restart_music(vc)
 
         await interaction.followup.send(
             f"✅ Joined **{channel.name}**"
@@ -146,7 +162,7 @@ async def join(interaction: discord.Interaction):
         )
 
 # ======================
-# LEAVE COMMAND
+# LEAVE
 # ======================
 
 @bot.tree.command(
@@ -191,23 +207,20 @@ async def leave(interaction: discord.Interaction):
         )
 
 # ======================
-# RESTART MUSIC WHEN USER JOINS BOT VC
+# USER JOINS BOT VC
 # ======================
 
 @bot.event
 async def on_voice_state_update(member, before, after):
 
-    # Ignore bots
     if member.bot:
         return
 
     vc = member.guild.voice_client
 
-    # Bot not connected
     if vc is None:
         return
 
-    # User joined bot's voice channel
     if (
         before.channel != vc.channel
         and after.channel == vc.channel
@@ -215,25 +228,105 @@ async def on_voice_state_update(member, before, after):
 
         print(
             f"{member} joined {vc.channel.name}. "
-            f"Restarting music in 1.5 seconds..."
+            f"Restart scheduled..."
         )
 
-        # Wait 3.0 seconds
-        await asyncio.sleep(3.0)
+        guild_id = member.guild.id
 
-        # Verify bot still connected
-        vc = member.guild.voice_client
+        old_task = restart_tasks.get(guild_id)
 
-        if vc is None:
+        if old_task and not old_task.done():
+            old_task.cancel()
+
+        async def delayed_restart():
+
+            try:
+
+                await asyncio.sleep(1.5)
+
+                vc = member.guild.voice_client
+
+                if vc is None:
+                    return
+
+                if not vc.is_connected():
+                    return
+
+                await restart_music(vc)
+
+            except asyncio.CancelledError:
+                pass
+
+            except Exception as e:
+                print(
+                    "Restart Task Error:",
+                    e
+                )
+
+        restart_tasks[guild_id] = asyncio.create_task(
+            delayed_restart()
+        )
+
+# ======================
+# BOT VC MONITOR
+# ======================
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+
+    if member.id == bot.user.id:
+
+        if before.channel and after.channel is None:
+
+            print(
+                f"⚠️ Bot disconnected from "
+                f"{before.channel.name}"
+            )
+
             return
 
-        if vc.channel is None:
-            return
+    if member.bot:
+        return
 
-        if vc.is_playing():
-            vc.stop()
+    vc = member.guild.voice_client
 
-        play_music(vc)
+    if vc is None:
+        return
+
+    if (
+        before.channel != vc.channel
+        and after.channel == vc.channel
+    ):
+
+        guild_id = member.guild.id
+
+        old_task = restart_tasks.get(guild_id)
+
+        if old_task and not old_task.done():
+            old_task.cancel()
+
+        async def delayed_restart():
+
+            try:
+
+                await asyncio.sleep(1.5)
+
+                vc = member.guild.voice_client
+
+                if vc is None:
+                    return
+
+                if not vc.is_connected():
+                    return
+
+                await restart_music(vc)
+
+            except asyncio.CancelledError:
+                pass
+
+        restart_tasks[guild_id] = asyncio.create_task(
+            delayed_restart()
+        )
 
 # ======================
 # RUN
